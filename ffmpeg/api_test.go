@@ -1307,6 +1307,11 @@ func detectionFreq(t *testing.T, accel Acceleration) {
   `
 	run(cmd)
 
+	err := ffmpeg.InitFFmpegWithDetectorProfile(&ffmpeg.DSceneAdultSoccer, "0")
+	if err != nil {
+		t.Error(err)
+	}
+	defer ffmpeg.ReleaseFFmpegDetectorProfile()
 	// Test encoding with only seg0 and seg2 under detection
 	tc := NewTranscoder()
 	prof := P144p30fps16x9
