@@ -87,7 +87,8 @@ void lpms_init(enum LPMSLogLevel max_level)
 
 int lpms_dnninit(lvpdnn_opts *dnn_opts) {
 
-    int res = avfilter_register_lvpdnn(dnn_opts->modelpath,dnn_opts->inputname,dnn_opts->outputname,dnn_opts->deviceids);
+    /*int res = avfilter_register_lvpdnn(dnn_opts->modelpath,dnn_opts->inputname,dnn_opts->outputname,dnn_opts->deviceids);*/
+    int res = 0;
     if(res != 0) {
       LPMS_WARN("Could not initialize dnn module!");
     }
@@ -95,7 +96,7 @@ int lpms_dnninit(lvpdnn_opts *dnn_opts) {
 }
 
 void lpms_dnnrelease() {
-  avfilter_remove_lvpdnn();
+  //avfilter_remove_lvpdnn();
 }
 
 //
