@@ -85,17 +85,49 @@ void lpms_init(enum LPMSLogLevel max_level)
   av_log_set_level(max_level);
 }
 
-int lpms_dnninit(lvpdnn_opts *dnn_opts) {
+AVFilterGraph * lpms_dnninit(lvpdnn_opts *dnn_opts)
+{
+  const AVFilter *filter;
+  AVFilterContext *filter_ctx;
+  AVFilterGraph *graph_ctx;
+  int ret = 0;
+  char *filter_name = "livepeer_dnn";
+  char filter_args[512];
+  snprintf(filter_args, sizeof filter_args, "model=%s:input=%s:output=%s:sample=30",
+           dnn_opts->modelpath, dnn_opts->inputname, dnn_opts->outputname);
 
-    int res = avfilter_register_lvpdnn(dnn_opts->modelpath,dnn_opts->inputname,dnn_opts->outputname,dnn_opts->deviceids);
-    if(res != 0) {
-      LPMS_WARN("Could not initialize dnn module!");
-    }
-    return res;
+  /* allocate graph */
+  graph_ctx = avfilter_graph_alloc();
+  if (!graph_ctx)
+    return NULL;
+  
+  /* get a corresponding filter and open it */
+  if (!(filter = avfilter_get_by_name(filter_name))) {
+    fprintf(stderr, "Unrecognized filter with name '%s'\n", filter_name);
+    return NULL;
+  }
+  
+  /* open filter and add it to the graph */
+  if (!(filter_ctx = avfilter_graph_alloc_filter(graph_ctx, filter, filter_name))) {
+    fprintf(stderr, "Impossible to open filter with name '%s'\n",
+           filter_name);
+    return NULL;
+  }
+  if (avfilter_init_str(filter_ctx, filter_args) < 0) {
+    fprintf(stderr, "Impossible to init filter '%s' with arguments '%s'\n",
+           filter_name, filter_args);
+    return NULL;
+  }
+
+  /* print model file name after cast */
+  LivepeerContext *lp_ctx = filter_ctx->priv;
+  printf("model file from cast: %s\n", lp_ctx->dnnctx.model_filename);
+  return graph_ctx;
 }
 
-void lpms_dnnrelease() {
-  avfilter_remove_lvpdnn();
+void lpms_dnnrelease(AVFilterGraph *graph_ctx)
+{
+     avfilter_graph_free(&graph_ctx);
 }
 
 //
@@ -174,7 +206,10 @@ int transcode(struct transcode_thread *h,
       octx->audio = &params[i].audio;
       octx->video = &params[i].video;
       octx->vfilters = params[i].vfilters;
-      octx->is_dnn_profile = (strncmp(octx->vfilters,LVPDNN_FILTER_NAME, strlen(LVPDNN_FILTER_NAME)) == 0 );      
+      octx->dnn_filtergraph = params[i].dnn_filtergraph;
+      /*octx->is_dnn_profile = (strncmp(octx->vfilters,LVPDNN_FILTER_NAME, strlen(LVPDNN_FILTER_NAME)) == 0 );      */
+      octx->is_dnn_profile = (octx->dnn_filtergraph != NULL);      
+      printf("DNN FILTERGRAPH %p\n", octx->dnn_filtergraph);
       if (params[i].bitrate) octx->bitrate = params[i].bitrate;
       if (params[i].fps.den) octx->fps = params[i].fps;
       if (params[i].gop_time) octx->gop_time = params[i].gop_time;

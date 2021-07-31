@@ -29,6 +29,7 @@ typedef struct {
   char *vfilters;
   int w, h, bitrate, gop_time;
   AVRational fps;
+  AVFilterGraph *dnn_filtergraph;
 
   component_opts muxer;
   component_opts audio;
@@ -88,7 +89,7 @@ struct transcode_thread* lpms_transcode_new();
 void lpms_transcode_stop(struct transcode_thread* handle);
 void lpms_transcode_discontinuity(struct transcode_thread *handle);
 
-int lpms_dnninit(lvpdnn_opts *dnn_opts);
-void lpms_dnnrelease();
+AVFilterGraph * lpms_dnninit(lvpdnn_opts *dnn_opts);
+void lpms_dnnrelease(AVFilterGraph *graph_ctx);
 
 #endif // _LPMS_TRANSCODER_H_

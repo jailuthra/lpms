@@ -5,6 +5,8 @@
 #include <libavfilter/buffersink.h>
 
 #include <libavutil/opt.h>
+ 
+int attempt = 0;
 
 int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
 {
@@ -93,8 +95,36 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
                                     &inputs, &outputs, NULL);
     if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable to parse video filters desc");
 
+    // Take DNN filter context from old graph, and place it in new graph
+    if (octx->dnn_filtergraph && attempt == 2) {
+        // Memcpy the filter context
+        AVFilterContext *dnn_filter_preloaded = avfilter_graph_get_filter(octx->dnn_filtergraph, "livepeer_dnn");
+        AVFilterContext *dnn_filter = malloc(sizeof(AVFilterContext));
+        memcpy(dnn_filter, dnn_filter_preloaded, sizeof(AVFilterContext));
+        // Append filter in new filtergraph
+        AVFilterContext **filters = av_realloc(vf->graph->filters, sizeof(*filters) * (vf->graph->nb_filters + 1));
+        if (!filters) {
+            LPMS_ERR(vf_init_cleanup, "Unable to add a new filter in filtergraph"); 
+        }
+        vf->graph->filters = filters;
+        vf->graph->filters[vf->graph->nb_filters++] = dnn_filter;
+        dnn_filter->graph = vf->graph;
+        // Place filter in correct position in the linkedlist
+        for (int i = 0; i < vf->graph->nb_filters; i++) {
+            if (strcmp(vf->graph->filters[i]->name, "out") == 0) {
+                AVFilterContext *sink_filter = vf->graph->filters[i];
+                assert(sink_filter->nb_inputs == 1);
+                printf("Found link %s -> %s\n", sink_filter->inputs[0]->src->name, sink_filter->inputs[0]->dst->name);
+                ret = avfilter_insert_filter(sink_filter->inputs[0], dnn_filter, 0, 0);
+                if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable to insert DNN filter inside last link");
+            }
+        }
+    }
+
     ret = avfilter_graph_config(vf->graph, NULL);
     if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable configure video filtergraph");
+
+    printf("FILTERGRAPH: %s\n", avfilter_graph_dump(vf->graph, NULL));
 
     vf->frame = av_frame_alloc();
     if (!vf->frame) LPMS_ERR(vf_init_cleanup, "Unable to allocate video frame");
@@ -207,11 +237,13 @@ int filtergraph_write(AVFrame *inf, struct input_ctx *ictx, struct output_ctx *o
   // Sometimes we have to reset the filter if the HW context is updated
   // because we initially set the filter before the decoder is fully ready
   // and the decoder may change HW params
-  if (is_video && inf && inf->hw_frames_ctx && filter->hwframes &&
-      inf->hw_frames_ctx->data != filter->hwframes) {
-    free_filter(&octx->vf); // XXX really should flush filter first
-    ret = init_video_filters(ictx, octx);
-    if (ret < 0) return lpms_ERR_FILTERS;
+  if (is_video && inf && inf->hw_frames_ctx && filter->hwframes) {
+    if (inf->hw_frames_ctx->data != filter->hwframes) {
+      free_filter(&octx->vf); // XXX really should flush filter first
+      attempt = 2;
+      ret = init_video_filters(ictx, octx);
+      if (ret < 0) return lpms_ERR_FILTERS;
+    }
   }
 
   // Timestamp handling code

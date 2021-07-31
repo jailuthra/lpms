@@ -45,6 +45,24 @@ func main() {
 	profiles := str2profs(os.Args[3])
 	accel, lbl := str2accel(os.Args[4])
 
+	var dev string
+	if accel == ffmpeg.Nvidia {
+		if len(os.Args) <= 5 {
+			panic("Expected device number")
+		}
+		dev = os.Args[5]
+	}
+
+	t := time.Now()
+	filtergraph, err := ffmpeg.InitFFmpegWithDetectorProfile(&ffmpeg.DSceneAdultSoccer, deviceids)
+	defer ffmpeg.ReleaseFFmpegDetectorProfile(filtergraph)
+	end := time.Now()
+
+	if err != nil {
+		panic("Could not initializ DNN engine!")
+	}
+	fmt.Printf("InitFFmpegWithDetectorProfile time %0.4v\n", end.Sub(t).Seconds())
+
 	profs2opts := func(profs []ffmpeg.VideoProfile) []ffmpeg.TranscodeOptions {
 		opts := []ffmpeg.TranscodeOptions{}
 		for i := range profs {
@@ -57,33 +75,16 @@ func main() {
 		}
 		//add detection profile
 		o := ffmpeg.TranscodeOptions{
-			Oname:    "out_null.mkv",
-			Profile:  ffmpeg.P144p30fps16x9,
-			Detector: &ffmpeg.DSceneAdultSoccer,
-			Accel:    accel,
+			Oname:               fmt.Sprintf("out_dnn.mkv"),
+			Profile:             ffmpeg.P144p30fps16x9,
+			Detector:            &ffmpeg.DSceneAdultSoccer,
+			DetectorFilterGraph: filtergraph,
+			Accel:               accel,
 		}
 		opts = append(opts, o)
 		return opts
 	}
 	options := profs2opts(profiles)
-
-	var dev string
-	if accel == ffmpeg.Nvidia {
-		if len(os.Args) <= 5 {
-			panic("Expected device number")
-		}
-		dev = os.Args[5]
-	}
-
-	t := time.Now()
-	err := ffmpeg.InitFFmpegWithDetectorProfile(&ffmpeg.DSceneAdultSoccer, deviceids)
-	defer ffmpeg.ReleaseFFmpegDetectorProfile()
-	end := time.Now()
-
-	if err != nil {
-		panic("Could not initializ DNN engine!")
-	}
-	fmt.Printf("InitFFmpegWithDetectorProfile time %0.4v\n", end.Sub(t).Seconds())
 
 	t = time.Now()
 	fmt.Printf("Setting fname %s encoding %d renditions with %v\n", fname, len(options), lbl)
