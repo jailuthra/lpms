@@ -67,7 +67,7 @@ struct output_ctx {
 
 };
 
-int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx);
+int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx, int attempt);
 int init_audio_filters(struct input_ctx *ictx, struct output_ctx *octx);
 int filtergraph_write(AVFrame *inf, struct input_ctx *ictx, struct output_ctx *octx, struct filter_ctx *filter, int is_video);
 int filtergraph_read(struct input_ctx *ictx, struct output_ctx *octx, struct filter_ctx *filter, int is_video);

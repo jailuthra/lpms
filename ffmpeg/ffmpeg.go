@@ -321,7 +321,7 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
 				if input.Accel != Software {
 					filters = fmt.Sprintf("hwdownload,format=nv12")
 				} else {
-					filters = fmt.Sprintf("format=nv12")
+					filters = fmt.Sprintf("format=yuv420p")
 				}
 				//filters += fmt.Sprintf(",livepeer_dnn=sample=%d:preloadedDNN=%p", detectorProfile.SampleRate)
 			}

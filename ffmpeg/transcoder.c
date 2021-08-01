@@ -93,7 +93,7 @@ AVFilterGraph * lpms_dnninit(lvpdnn_opts *dnn_opts)
   int ret = 0;
   char *filter_name = "livepeer_dnn";
   char filter_args[512];
-  snprintf(filter_args, sizeof filter_args, "model=%s:input=%s:output=%s:sample=30",
+  snprintf(filter_args, sizeof filter_args, "model=%s:input=%s:output=%s:sample=5",
            dnn_opts->modelpath, dnn_opts->inputname, dnn_opts->outputname);
 
   /* allocate graph */
@@ -119,15 +119,11 @@ AVFilterGraph * lpms_dnninit(lvpdnn_opts *dnn_opts)
     return NULL;
   }
 
-  /* print model file name after cast */
-  LivepeerContext *lp_ctx = filter_ctx->priv;
-  printf("model file from cast: %s\n", lp_ctx->dnnctx.model_filename);
   return graph_ctx;
 }
 
 void lpms_dnnrelease(AVFilterGraph *graph_ctx)
 {
-     avfilter_graph_free(&graph_ctx);
 }
 
 //

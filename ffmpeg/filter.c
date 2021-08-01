@@ -5,10 +5,10 @@
 #include <libavfilter/buffersink.h>
 
 #include <libavutil/opt.h>
- 
-int attempt = 0;
 
-int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
+#include <assert.h>
+ 
+int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx, int attempt)
 {
     char args[512];
     int ret = 0;
@@ -28,7 +28,11 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
 
     outputs = avfilter_inout_alloc();
     inputs = avfilter_inout_alloc();
-    vf->graph = avfilter_graph_alloc();
+    if (octx->dnn_filtergraph && (attempt == 2 || !ictx->vc->hw_frames_ctx)) {
+      vf->graph = octx->dnn_filtergraph;
+    } else {
+      vf->graph = avfilter_graph_alloc();
+    }
     vf->pts_diff = INT64_MIN;
     if (!outputs || !inputs || !vf->graph) {
       ret = AVERROR(ENOMEM);
@@ -96,8 +100,8 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
     if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable to parse video filters desc");
 
     // Take DNN filter context from old graph, and place it in new graph
-    if (octx->dnn_filtergraph && attempt == 2) {
-        // Memcpy the filter context
+    if (octx->dnn_filtergraph && (attempt == 2 || !ictx->vc->hw_frames_ctx)) {
+        /*// Memcpy the filter context
         AVFilterContext *dnn_filter_preloaded = avfilter_graph_get_filter(octx->dnn_filtergraph, "livepeer_dnn");
         AVFilterContext *dnn_filter = malloc(sizeof(AVFilterContext));
         memcpy(dnn_filter, dnn_filter_preloaded, sizeof(AVFilterContext));
@@ -108,7 +112,8 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
         }
         vf->graph->filters = filters;
         vf->graph->filters[vf->graph->nb_filters++] = dnn_filter;
-        dnn_filter->graph = vf->graph;
+        dnn_filter->graph = vf->graph;*/
+        AVFilterContext *dnn_filter = avfilter_graph_get_filter(vf->graph, "livepeer_dnn");
         // Place filter in correct position in the linkedlist
         for (int i = 0; i < vf->graph->nb_filters; i++) {
             if (strcmp(vf->graph->filters[i]->name, "out") == 0) {
@@ -240,10 +245,10 @@ int filtergraph_write(AVFrame *inf, struct input_ctx *ictx, struct output_ctx *o
   if (is_video && inf && inf->hw_frames_ctx && filter->hwframes) {
     if (inf->hw_frames_ctx->data != filter->hwframes) {
       free_filter(&octx->vf); // XXX really should flush filter first
-      attempt = 2;
-      ret = init_video_filters(ictx, octx);
+      ret = init_video_filters(ictx, octx, 2);
       if (ret < 0) return lpms_ERR_FILTERS;
     }
+    struct filter_ctx *vf = filter;
   }
 
   // Timestamp handling code
