@@ -74,10 +74,12 @@ func main() {
 			opts = append(opts, o)
 		}
 		//add detection profile
+		detectorProfile := ffmpeg.DSceneAdultSoccer
+		detectorProfile.SampleRate = 10
 		o := ffmpeg.TranscodeOptions{
 			Oname:               fmt.Sprintf("out_dnn.mkv"),
 			Profile:             ffmpeg.P144p30fps16x9,
-			Detector:            &ffmpeg.DSceneAdultSoccer,
+			Detector:            &detectorProfile,
 			DetectorFilterGraph: filtergraph,
 			Accel:               accel,
 		}

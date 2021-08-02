@@ -315,15 +315,13 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
 			//}
 			switch p.Detector.Type() {
 			case SceneClassification:
-				//detectorProfile := p.Detector.(*SceneClassificationProfile)
+				detectorProfile := p.Detector.(*SceneClassificationProfile)
 				//filters = fmt.Sprintf("lvpdnn=filter_type=lvpclassify:device=%s:model=%s:input=%s:output=%s:sample=%d",
 				//deviceid, detectorProfile.ModelPath, detectorProfile.Input, detectorProfile.Output, detectorProfile.SampleRate)
+				filters = fmt.Sprintf("select='not(mod(n\\,%v))'", detectorProfile.SampleRate)
 				if input.Accel != Software {
-					filters = fmt.Sprintf("hwdownload,format=nv12")
-				} else {
-					filters = fmt.Sprintf("format=yuv420p")
+					filters += ",hwdownload,format=nv12"
 				}
-				//filters += fmt.Sprintf(",livepeer_dnn=sample=%d:preloadedDNN=%p", detectorProfile.SampleRate)
 			}
 		}
 		var muxOpts C.component_opts

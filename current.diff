@@ -1,0 +1,416 @@
+========================
+What happens when multiple streams are transcoded, each with its own filtergraph?
+How much memory do they consume?
+============================
+diff --git a/cmd/scenedetection/scenedetection.go b/cmd/scenedetection/scenedetection.go
+index 38d2480..4b53df4 100644
+--- a/cmd/scenedetection/scenedetection.go
++++ b/cmd/scenedetection/scenedetection.go
+@@ -45,6 +45,24 @@ func main() {
+ 	profiles := str2profs(os.Args[3])
+ 	accel, lbl := str2accel(os.Args[4])
+ 
++	var dev string
++	if accel == ffmpeg.Nvidia {
++		if len(os.Args) <= 5 {
++			panic("Expected device number")
++		}
++		dev = os.Args[5]
++	}
++
++	t := time.Now()
++	filtergraph, err := ffmpeg.InitFFmpegWithDetectorProfile(&ffmpeg.DSceneAdultSoccer, deviceids)
+========
+Rename method to something better
+========
++	defer ffmpeg.ReleaseFFmpegDetectorProfile(filtergraph)
++	end := time.Now()
++
++	if err != nil {
++		panic("Could not initializ DNN engine!")
++	}
++	fmt.Printf("InitFFmpegWithDetectorProfile time %0.4v\n", end.Sub(t).Seconds())
++
+ 	profs2opts := func(profs []ffmpeg.VideoProfile) []ffmpeg.TranscodeOptions {
+ 		opts := []ffmpeg.TranscodeOptions{}
+ 		for i := range profs {
+@@ -57,34 +75,18 @@ func main() {
+ 		}
+ 		//add detection profile
+ 		o := ffmpeg.TranscodeOptions{
+-			Oname:    "out_null.mkv",
+-			Profile:  ffmpeg.P144p30fps16x9,
+-			Detector: &ffmpeg.DSceneAdultSoccer,
+-			Accel:    accel,
++			Oname:               fmt.Sprintf("out_dnn.mkv"),
++			Profile:             ffmpeg.P144p30fps16x9,
++			Detector:            &ffmpeg.DSceneAdultSoccer,
++			DetectorFilterGraph: filtergraph,
++			Accel:               accel,
+ 		}
++		o.Detector.SampleRate = 10
+ 		opts = append(opts, o)
+ 		return opts
+ 	}
+ 	options := profs2opts(profiles)
+ 
+-	var dev string
+-	if accel == ffmpeg.Nvidia {
+-		if len(os.Args) <= 5 {
+-			panic("Expected device number")
+-		}
+-		dev = os.Args[5]
+-	}
+-
+-	t := time.Now()
+-	err := ffmpeg.InitFFmpegWithDetectorProfile(&ffmpeg.DSceneAdultSoccer, deviceids)
+-	defer ffmpeg.ReleaseFFmpegDetectorProfile()
+-	end := time.Now()
+-
+-	if err != nil {
+-		panic("Could not initializ DNN engine!")
+-	}
+-	fmt.Printf("InitFFmpegWithDetectorProfile time %0.4v\n", end.Sub(t).Seconds())
+-
+ 	t = time.Now()
+ 	fmt.Printf("Setting fname %s encoding %d renditions with %v\n", fname, len(options), lbl)
+ 	res, err := ffmpeg.Transcode3(&ffmpeg.TranscodeOptionsIn{
+diff --git a/ffmpeg/encoder.c b/ffmpeg/encoder.c
+index e825c75..b05e3fb 100644
+--- a/ffmpeg/encoder.c
++++ b/ffmpeg/encoder.c
+@@ -201,7 +201,7 @@ int open_output(struct output_ctx *octx, struct input_ctx *ictx)
+ 
+   // add video encoder if a decoder exists and this output requires one
+   if (ictx->vc && needs_decoder(octx->video->name)) {
+-    ret = init_video_filters(ictx, octx);
++    ret = init_video_filters(ictx, octx, 1);
+
+========
+Extract-out the logic of filter attempts/filtergraph used
+=======
+
+     if (ret < 0) LPMS_ERR(open_output_err, "Unable to open video filter");
+ 
+     codec = avcodec_find_encoder_by_name(octx->video->name);
+diff --git a/ffmpeg/ffmpeg.go b/ffmpeg/ffmpeg.go
+index 3976260..434b5d2 100644
+--- a/ffmpeg/ffmpeg.go
++++ b/ffmpeg/ffmpeg.go
+@@ -62,11 +62,12 @@ type TranscodeOptionsIn struct {
+ }
+ 
+ type TranscodeOptions struct {
+-	Oname    string
+-	Profile  VideoProfile
+-	Detector DetectorProfile
+-	Accel    Acceleration
+-	Device   string
++	Oname               string
++	Profile             VideoProfile
++	Detector            DetectorProfile
++	DetectorFilterGraph *C.AVFilterGraph
++	Accel               Acceleration
++	Device              string
+ 
+ 	Muxer        ComponentOptions
+ 	VideoEncoder ComponentOptions
+@@ -249,7 +250,7 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
+ 	}
+ 	params := make([]C.output_params, len(ps))
+ 	for i, p := range ps {
+-		if p.Detector != nil {
++		if p.Detector != nil && p.DetectorFilterGraph != nil {
+ 			// We don't do any encoding for detector profiles
+ 			// Adding placeholder values to pass checks for these everywhere
+ 			p.Oname = "/dev/null"
+@@ -307,7 +308,7 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
+ 		}
+ 		// if has a detector profile, ignore all video options
+ 		if p.Detector != nil {
+-			deviceid := "0"
++			//deviceid := "0"
+==============
+Figure out how to set deviceID
+=====================
+ 			// FIXME: Hardcoded DNN filter device to 0 for now
+ 			//if input.Accel != Software && len(input.Device) > 0 {
+ 			//deviceid = input.Device
+@@ -315,8 +316,12 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
+ 			switch p.Detector.Type() {
+ 			case SceneClassification:
+ 				detectorProfile := p.Detector.(*SceneClassificationProfile)
+-				filters = fmt.Sprintf("lvpdnn=filter_type=lvpclassify:device=%s:model=%s:input=%s:output=%s:sample=%d",
+-					deviceid, detectorProfile.ModelPath, detectorProfile.Input, detectorProfile.Output, detectorProfile.SampleRate)
++				//filters = fmt.Sprintf("lvpdnn=filter_type=lvpclassify:device=%s:model=%s:input=%s:output=%s:sample=%d",
++				//deviceid, detectorProfile.ModelPath, detectorProfile.Input, detectorProfile.Output, detectorProfile.SampleRate)
++				filters = fmt.Sprintf("select='not(mod(n\\,%v))'", detectorProfile.SampleRate)
++				if input.Accel != Software {
++					filters += ",hwdownload,format=nv12"
++				}
+ 			}
+ 		}
+ 		var muxOpts C.component_opts
+@@ -406,7 +411,8 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
+ 		params[i] = C.output_params{fname: oname, fps: fps,
+ 			w: C.int(w), h: C.int(h), bitrate: C.int(bitrate),
+ 			gop_time: C.int(gopMs),
+-			muxer:    muxOpts, audio: audioOpts, video: vidOpts, vfilters: vfilt}
++			muxer:    muxOpts, audio: audioOpts, video: vidOpts,
++			vfilters: vfilt, dnn_filtergraph: p.DetectorFilterGraph}
+ 		defer func(param *C.output_params) {
+ 			// Work around the ownership rules:
+ 			// ffmpeg normally takes ownership of the following AVDictionary options
+@@ -519,11 +525,11 @@ func InitFFmpeg() {
+ 	InitFFmpegWithLogLevel(FFLogWarning)
+ }
+ 
+-func ReleaseFFmpegDetectorProfile() {
+-	C.lpms_dnnrelease()
++func ReleaseFFmpegDetectorProfile(dnnFilter *C.AVFilterGraph) {
++	C.lpms_dnnrelease(dnnFilter)
+ }
+-func InitFFmpegWithDetectorProfile(detector DetectorProfile, deviceids string) error {
+-
++func InitFFmpegWithDetectorProfile(detector DetectorProfile, deviceids string) (*C.AVFilterGraph, error) {
++	var filtergraph *C.AVFilterGraph
+ 	switch detector.Type() {
+ 	case SceneClassification:
+ 		detectorProfile := detector.(*SceneClassificationProfile)
+@@ -538,13 +544,13 @@ func InitFFmpegWithDetectorProfile(detector DetectorProfile, deviceids string) e
+ 		defer C.free(unsafe.Pointer(dnnOpt.outputname))
+ 		defer C.free(unsafe.Pointer(dnnOpt.deviceids))
+ 
+-		ret := int(C.lpms_dnninit(dnnOpt))
+-		if 0 != ret {
+-			glog.Error("lpms_dnninit Return : ", ErrorMap[ret])
+-			return ErrDNNInitialize
++		filtergraph = C.lpms_dnninit(dnnOpt)
++		if nil == filtergraph {
++			glog.Error("lpms_dnninit Failed")
++			return nil, ErrDNNInitialize
+ 		}
+ 	}
+ 
+ 	InitFFmpegWithLogLevel(FFLogWarning)
+-	return nil
++	return filtergraph, nil
+ }
+diff --git a/ffmpeg/filter.c b/ffmpeg/filter.c
+index 761be7c..b90ec34 100644
+--- a/ffmpeg/filter.c
++++ b/ffmpeg/filter.c
+@@ -6,7 +6,9 @@
+ 
+ #include <libavutil/opt.h>
+ 
+-int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
++#include <assert.h>
++ 
++int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx, int attempt)
+ {
+     char args[512];
+     int ret = 0;
+@@ -26,7 +28,11 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
+ 
+     outputs = avfilter_inout_alloc();
+     inputs = avfilter_inout_alloc();
+-    vf->graph = avfilter_graph_alloc();
++    if (octx->dnn_filtergraph && (attempt == 2 || !ictx->vc->hw_frames_ctx)) {
++      vf->graph = octx->dnn_filtergraph;
++    } else {
++      vf->graph = avfilter_graph_alloc();
++    }
+===============
+Extract out this logic - caller should just pass the correct filtergraph
+==============
+     vf->pts_diff = INT64_MIN;
+     if (!outputs || !inputs || !vf->graph) {
+       ret = AVERROR(ENOMEM);
+@@ -93,9 +99,38 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
+                                     &inputs, &outputs, NULL);
+     if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable to parse video filters desc");
+ 
++    // Take DNN filter context from old graph, and place it in new graph
++    if (octx->dnn_filtergraph && (attempt == 2 || !ictx->vc->hw_frames_ctx)) {
+=============
+Can become if vf->graph == octx->dnn_filtergraph
+============
++        /*// Memcpy the filter context
++        AVFilterContext *dnn_filter_preloaded = avfilter_graph_get_filter(octx->dnn_filtergraph, "livepeer_dnn");
++        AVFilterContext *dnn_filter = malloc(sizeof(AVFilterContext));
++        memcpy(dnn_filter, dnn_filter_preloaded, sizeof(AVFilterContext));
++        // Append filter in new filtergraph
++        AVFilterContext **filters = av_realloc(vf->graph->filters, sizeof(*filters) * (vf->graph->nb_filters + 1));
++        if (!filters) {
++            LPMS_ERR(vf_init_cleanup, "Unable to add a new filter in filtergraph"); 
++        }
++        vf->graph->filters = filters;
++        vf->graph->filters[vf->graph->nb_filters++] = dnn_filter;
++        dnn_filter->graph = vf->graph;*/
+========
+Remove this
+============
++        AVFilterContext *dnn_filter = avfilter_graph_get_filter(vf->graph, "livepeer_dnn");
++        // Place filter in correct position in the linkedlist
++        for (int i = 0; i < vf->graph->nb_filters; i++) {
++            if (strcmp(vf->graph->filters[i]->name, "out") == 0) {
++                AVFilterContext *sink_filter = vf->graph->filters[i];
++                assert(sink_filter->nb_inputs == 1);
++                printf("Found link %s -> %s\n", sink_filter->inputs[0]->src->name, sink_filter->inputs[0]->dst->name);
++                ret = avfilter_insert_filter(sink_filter->inputs[0], dnn_filter, 0, 0);
++                if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable to insert DNN filter inside last link");
++            }
++        }
++    }
++
+     ret = avfilter_graph_config(vf->graph, NULL);
+     if (ret < 0) LPMS_ERR(vf_init_cleanup, "Unable configure video filtergraph");
+ 
++    printf("FILTERGRAPH: %s\n", avfilter_graph_dump(vf->graph, NULL));
+===========
+Remove this
+=======
++
+     vf->frame = av_frame_alloc();
+     if (!vf->frame) LPMS_ERR(vf_init_cleanup, "Unable to allocate video frame");
+ 
+@@ -207,11 +242,13 @@ int filtergraph_write(AVFrame *inf, struct input_ctx *ictx, struct output_ctx *o
+   // Sometimes we have to reset the filter if the HW context is updated
+   // because we initially set the filter before the decoder is fully ready
+   // and the decoder may change HW params
+-  if (is_video && inf && inf->hw_frames_ctx && filter->hwframes &&
+-      inf->hw_frames_ctx->data != filter->hwframes) {
+-    free_filter(&octx->vf); // XXX really should flush filter first
+-    ret = init_video_filters(ictx, octx);
+-    if (ret < 0) return lpms_ERR_FILTERS;
++  if (is_video && inf && inf->hw_frames_ctx && filter->hwframes) {
++    if (inf->hw_frames_ctx->data != filter->hwframes) {
+========
+Change this to how it was before
+or maybe keep extracted-logic here?
+Also how can we ensure that this path is *always* hit on all environments - if we can't we should make this compulsary
+=============
++      free_filter(&octx->vf); // XXX really should flush filter first
++      ret = init_video_filters(ictx, octx, 2);
++      if (ret < 0) return lpms_ERR_FILTERS;
++    }
++    struct filter_ctx *vf = filter;
+   }
+ 
+   // Timestamp handling code
+diff --git a/ffmpeg/filter.h b/ffmpeg/filter.h
+index c988ba1..85f29c2 100644
+--- a/ffmpeg/filter.h
++++ b/ffmpeg/filter.h
+@@ -60,13 +60,14 @@ struct output_ctx {
+ 
+   int64_t gop_time, gop_pts_len, next_kf_pts; // for gop reset
+ 
++  AVFilterGraph * dnn_filtergraph;
+   int is_dnn_profile; //if not dnn profile: 0
+ 
+   output_results  *res; // data to return for this output
+ 
+ };
+ 
+-int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx);
++int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx, int attempt);
+ int init_audio_filters(struct input_ctx *ictx, struct output_ctx *octx);
+ int filtergraph_write(AVFrame *inf, struct input_ctx *ictx, struct output_ctx *octx, struct filter_ctx *filter, int is_video);
+ int filtergraph_read(struct input_ctx *ictx, struct output_ctx *octx, struct filter_ctx *filter, int is_video);
+diff --git a/ffmpeg/transcoder.c b/ffmpeg/transcoder.c
+index 338c968..c0a70f1 100644
+--- a/ffmpeg/transcoder.c
++++ b/ffmpeg/transcoder.c
+@@ -85,17 +85,45 @@ void lpms_init(enum LPMSLogLevel max_level)
+   av_log_set_level(max_level);
+ }
+ 
+-int lpms_dnninit(lvpdnn_opts *dnn_opts) {
++AVFilterGraph * lpms_dnninit(lvpdnn_opts *dnn_opts)
+=============
+Change name
+=============
++{
++  const AVFilter *filter;
++  AVFilterContext *filter_ctx;
++  AVFilterGraph *graph_ctx;
++  int ret = 0;
++  char *filter_name = "livepeer_dnn";
++  char filter_args[512];
++  snprintf(filter_args, sizeof filter_args, "model=%s:input=%s:output=%s:sample=1",
++           dnn_opts->modelpath, dnn_opts->inputname, dnn_opts->outputname);
++
++  /* allocate graph */
++  graph_ctx = avfilter_graph_alloc();
++  if (!graph_ctx)
++    return NULL;
++  
++  /* get a corresponding filter and open it */
++  if (!(filter = avfilter_get_by_name(filter_name))) {
++    fprintf(stderr, "Unrecognized filter with name '%s'\n", filter_name);
++    return NULL;
++  }
++  
++  /* open filter and add it to the graph */
++  if (!(filter_ctx = avfilter_graph_alloc_filter(graph_ctx, filter, filter_name))) {
++    fprintf(stderr, "Impossible to open filter with name '%s'\n",
++           filter_name);
++    return NULL;
++  }
++  if (avfilter_init_str(filter_ctx, filter_args) < 0) {
++    fprintf(stderr, "Impossible to init filter '%s' with arguments '%s'\n",
++           filter_name, filter_args);
++    return NULL;
++  }
+ 
+-    int res = avfilter_register_lvpdnn(dnn_opts->modelpath,dnn_opts->inputname,dnn_opts->outputname,dnn_opts->deviceids);
+-    if(res != 0) {
+-      LPMS_WARN("Could not initialize dnn module!");
+-    }
+-    return res;
++  return graph_ctx;
+ }
+ 
+-void lpms_dnnrelease() {
+-  avfilter_remove_lvpdnn();
++void lpms_dnnrelease(AVFilterGraph *graph_ctx)
++{
+ }
+ 
+ //
+@@ -174,7 +202,10 @@ int transcode(struct transcode_thread *h,
+       octx->audio = &params[i].audio;
+       octx->video = &params[i].video;
+       octx->vfilters = params[i].vfilters;
+-      octx->is_dnn_profile = (strncmp(octx->vfilters,LVPDNN_FILTER_NAME, strlen(LVPDNN_FILTER_NAME)) == 0 );      
++      octx->dnn_filtergraph = params[i].dnn_filtergraph;
++      /*octx->is_dnn_profile = (strncmp(octx->vfilters,LVPDNN_FILTER_NAME, strlen(LVPDNN_FILTER_NAME)) == 0 );      */
++      octx->is_dnn_profile = (octx->dnn_filtergraph != NULL);      
++      printf("DNN FILTERGRAPH %p\n", octx->dnn_filtergraph);
+       if (params[i].bitrate) octx->bitrate = params[i].bitrate;
+       if (params[i].fps.den) octx->fps = params[i].fps;
+       if (params[i].gop_time) octx->gop_time = params[i].gop_time;
+diff --git a/ffmpeg/transcoder.h b/ffmpeg/transcoder.h
+index ec564f3..ecd25cd 100644
+--- a/ffmpeg/transcoder.h
++++ b/ffmpeg/transcoder.h
+@@ -29,6 +29,7 @@ typedef struct {
+   char *vfilters;
+   int w, h, bitrate, gop_time;
+   AVRational fps;
++  AVFilterGraph *dnn_filtergraph;
+ 
+   component_opts muxer;
+   component_opts audio;
+@@ -88,7 +89,7 @@ struct transcode_thread* lpms_transcode_new();
+ void lpms_transcode_stop(struct transcode_thread* handle);
+ void lpms_transcode_discontinuity(struct transcode_thread *handle);
+ 
+-int lpms_dnninit(lvpdnn_opts *dnn_opts);
+-void lpms_dnnrelease();
++AVFilterGraph * lpms_dnninit(lvpdnn_opts *dnn_opts);
++void lpms_dnnrelease(AVFilterGraph *graph_ctx);
+ 
+ #endif // _LPMS_TRANSCODER_H_
