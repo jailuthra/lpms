@@ -47,6 +47,7 @@ const (
 	Software Acceleration = iota
 	Nvidia
 	Amd
+	VideoToolbox
 )
 
 var FfEncoderLookup = map[Acceleration]map[VideoCodec]string{
@@ -59,6 +60,10 @@ var FfEncoderLookup = map[Acceleration]map[VideoCodec]string{
 	Nvidia: {
 		H264: "h264_nvenc",
 		H265: "hevc_nvenc",
+	},
+	VideoToolbox: {
+		H264: "h264_videotoolbox",
+		H265: "hevc_videotoolbox",
 	},
 }
 
@@ -300,9 +305,9 @@ func newAVOpts(opts map[string]string) *C.AVDictionary {
 func configEncoder(inOpts *TranscodeOptionsIn, outOpts TranscodeOptions, inDev, outDev string) (string, string, error) {
 	encoder := FfEncoderLookup[outOpts.Accel][outOpts.Profile.Encoder]
 	switch inOpts.Accel {
-	case Software:
+	case Software, VideoToolbox:
 		switch outOpts.Accel {
-		case Software:
+		case Software, VideoToolbox:
 			return encoder, "scale", nil
 		case Nvidia:
 			upload := "hwupload_cuda"
@@ -313,7 +318,7 @@ func configEncoder(inOpts *TranscodeOptionsIn, outOpts TranscodeOptions, inDev, 
 		}
 	case Nvidia:
 		switch outOpts.Accel {
-		case Software:
+		case Software, VideoToolbox:
 			return encoder, "scale_cuda", nil
 		case Nvidia:
 			// If we encode on a different device from decode then need to transfer
@@ -327,11 +332,12 @@ func configEncoder(inOpts *TranscodeOptionsIn, outOpts TranscodeOptions, inDev, 
 }
 func accelDeviceType(accel Acceleration) (C.enum_AVHWDeviceType, error) {
 	switch accel {
-	case Software:
+	case Software, VideoToolbox:
 		return C.AV_HWDEVICE_TYPE_NONE, nil
 	case Nvidia:
 		return C.AV_HWDEVICE_TYPE_CUDA, nil
-
+		//case VideoToolbox:
+		//return C.AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nil
 	}
 	return C.AV_HWDEVICE_TYPE_NONE, ErrTranscoderHw
 }

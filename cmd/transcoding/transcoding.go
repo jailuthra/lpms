@@ -26,11 +26,13 @@ func main() {
 	var err error
 	args := append([]string{os.Args[0]}, flag.Args()...)
 	if len(args) <= 3 {
-		panic("Usage: [-hevc] [-from dur] [-to dur] <input file> <output renditions, comma separated> <sw/nv>")
+		panic("Usage: [-hevc] [-from dur] [-to dur] <input file> <output renditions, comma separated> <sw/nv/vt>")
 	}
 	str2accel := func(inp string) (ffmpeg.Acceleration, string) {
 		if inp == "nv" {
 			return ffmpeg.Nvidia, "nv"
+		} else if inp == "vt" {
+			return ffmpeg.VideoToolbox, "vt"
 		}
 		return ffmpeg.Software, "sw"
 	}
@@ -63,8 +65,8 @@ func main() {
 				// Detector: &ffmpeg.DSceneAdultSoccer,
 				Accel: accel,
 			}
-			o.From = *from
-			o.To = *to
+			//o.From = *from
+			//o.To = *to
 			opts = append(opts, o)
 		}
 		return opts
@@ -79,7 +81,7 @@ func main() {
 		dev = args[4]
 	}
 
-	ffmpeg.InitFFmpeg()
+	ffmpeg.InitFFmpegWithLogLevel(ffmpeg.FFLogDebug)
 
 	t := time.Now()
 	fmt.Printf("Setting fname %s encoding %d renditions with %v from %s to %s\n", fname, len(options), lbl, *from, *to)

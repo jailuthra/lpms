@@ -211,20 +211,34 @@ open_audio_err:
   return ret;
 }
 
-char* get_hw_decoder(int ff_codec_id)
+char* get_hw_decoder(int ff_codec_id, enum AVHWDeviceType hw_type)
 {
-    switch (ff_codec_id) {
+  switch (hw_type) {
+    case AV_HWDEVICE_TYPE_CUDA:
+      switch (ff_codec_id) {
         case AV_CODEC_ID_H264:
-            return "h264_cuvid";
+          return "h264_cuvid";
         case AV_CODEC_ID_HEVC:
-            return "hevc_cuvid";
+          return "hevc_cuvid";
         case AV_CODEC_ID_VP8:
-            return "vp8_cuvid";
+          return "vp8_cuvid";
         case AV_CODEC_ID_VP9:
-            return "vp9_cuvid";
+          return "vp9_cuvid";
         default:
-            return "";
-    }
+          return "";
+      }
+    case AV_HWDEVICE_TYPE_VIDEOTOOLBOX:
+      switch (ff_codec_id) {
+        case AV_CODEC_ID_H264:
+          return "h264_videotoolbox";
+        case AV_CODEC_ID_HEVC:
+          return "hevc_videotoolbox";
+        default:
+          return "";
+      }
+    default:
+      return "";
+  }
 }
 
 int open_video_decoder(input_params *params, struct input_ctx *ctx)
@@ -239,14 +253,15 @@ int open_video_decoder(input_params *params, struct input_ctx *ctx)
     LPMS_WARN("No video stream found in input");
   } else {
     if (AV_HWDEVICE_TYPE_CUDA == params->hw_type) {
-      char* decoder_name = get_hw_decoder(codec->id);
+      char* decoder_name = get_hw_decoder(codec->id, params->hw_type);
       if (!*decoder_name) {
         ret = lpms_ERR_INPUT_CODEC;
         LPMS_ERR(open_decoder_err, "Input codec does not support hardware acceleration");
       }
       AVCodec *c = avcodec_find_decoder_by_name(decoder_name);
+      av_log(NULL, AV_LOG_WARNING, "WARNING: %s:%d] HW_TYPE %d, decoder_name %s\n", __FILE__, __LINE__, params->hw_type, decoder_name); \
       if (c) codec = c;
-      else LPMS_WARN("Nvidia decoder not found; defaulting to software");
+      else LPMS_WARN("Hardware decoder not found; defaulting to software");
       if (AV_PIX_FMT_YUV420P != ic->streams[ctx->vi]->codecpar->format &&
           AV_PIX_FMT_YUVJ420P != ic->streams[ctx->vi]->codecpar->format) {
         // TODO check whether the color range is truncated if yuvj420p is used
