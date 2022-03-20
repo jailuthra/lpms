@@ -54,7 +54,7 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
     AVFilterInOut *outputs = NULL;
     AVFilterInOut *inputs  = NULL;
     AVRational time_base = ictx->ic->streams[ictx->vi]->time_base;
-    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_CUDA, AV_PIX_FMT_NONE }; // XXX ensure the encoder allows this
+    enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_CUDA, AV_PIX_FMT_NV12, AV_PIX_FMT_VIDEOTOOLBOX, AV_PIX_FMT_NONE }; // XXX ensure the encoder allows this
     struct filter_ctx *vf = &octx->vf;
     char *filters_descr = octx->vfilters;
     enum AVPixelFormat in_pix_fmt = ictx->vc->pix_fmt;
@@ -78,7 +78,7 @@ int init_video_filters(struct input_ctx *ictx, struct output_ctx *octx)
     /* buffer video source: the decoded frames from the decoder will be inserted here. */
     snprintf(args, sizeof args,
             "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
-            ictx->vc->width, ictx->vc->height, in_pix_fmt,
+            ictx->vc->width, ictx->vc->height, AV_PIX_FMT_NV12,//in_pix_fmt,
             time_base.num, time_base.den,
             ictx->vc->sample_aspect_ratio.num, ictx->vc->sample_aspect_ratio.den);
 

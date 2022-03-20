@@ -332,12 +332,12 @@ func configEncoder(inOpts *TranscodeOptionsIn, outOpts TranscodeOptions, inDev, 
 }
 func accelDeviceType(accel Acceleration) (C.enum_AVHWDeviceType, error) {
 	switch accel {
-	case Software, VideoToolbox:
+	case Software:
 		return C.AV_HWDEVICE_TYPE_NONE, nil
 	case Nvidia:
 		return C.AV_HWDEVICE_TYPE_CUDA, nil
-		//case VideoToolbox:
-		//return C.AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nil
+	case VideoToolbox:
+		return C.AV_HWDEVICE_TYPE_VIDEOTOOLBOX, nil
 	}
 	return C.AV_HWDEVICE_TYPE_NONE, ErrTranscoderHw
 }
@@ -429,7 +429,8 @@ func (t *Transcoder) Transcode(input *TranscodeOptionsIn, ps []TranscodeOptions)
 		}
 		// preserve aspect ratio along the larger dimension when rescaling
 		var filters string
-		filters = fmt.Sprintf("%s='w=if(gte(iw,ih),%d,-2):h=if(lt(iw,ih),%d,-2)'", scale_filter, w, h)
+		//filters = fmt.Sprintf("%s='w=if(gte(iw,ih),%d,-2):h=if(lt(iw,ih),%d,-2)'", scale_filter, w, h)
+		filters = fmt.Sprintf("format=pix_fmts='videotoolbox_vld|nv12',%s='w=%d:h=%d'", scale_filter, w, h)
 		if input.Accel != Software && p.Accel == Software {
 			// needed for hw dec -> hw rescale -> sw enc
 			filters = filters + ",hwdownload,format=nv12"

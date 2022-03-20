@@ -3,6 +3,7 @@
 #include "logging.h"
 
 #include <libavutil/pixfmt.h>
+#include <libavutil/pixdesc.h>
 
 static int lpms_send_packet(struct input_ctx *ictx, AVCodecContext *dec, AVPacket *pkt)
 {
@@ -156,6 +157,7 @@ static enum AVPixelFormat get_hw_pixfmt(AVCodecContext *vc, const enum AVPixelFo
   frames->sw_format = vc->sw_pix_fmt;
   frames->width = vc->width;
   frames->height = vc->height;
+  av_log(NULL, AV_LOG_WARNING, "WARNING: %s:%d] HW_FORMAT %d, SW_FORMAT %d\n", __FILE__, __LINE__, frames->format, frames->sw_format); \
 
   // May want to allocate extra HW frames if we encounter samples where
   // the defaults are insufficient. Raising this increases GPU memory usage
@@ -166,14 +168,12 @@ static enum AVPixelFormat get_hw_pixfmt(AVCodecContext *vc, const enum AVPixelFo
   if (AVERROR(ENOSYS) == ret) ret = lpms_ERR_INPUT_PIXFMT; // most likely
   if (ret < 0) LPMS_ERR(pixfmt_cleanup, "Unable to initialize a hardware frame pool");
 
-/*
 fprintf(stderr, "selected format: hw %s sw %s\n",
 av_get_pix_fmt_name(frames->format), av_get_pix_fmt_name(frames->sw_format));
 const enum AVPixelFormat *p;
 for (p = pix_fmts; *p != -1; p++) {
 fprintf(stderr,"possible format: %s\n", av_get_pix_fmt_name(*p));
 }
-*/
 
   return frames->format;
 
@@ -259,7 +259,6 @@ int open_video_decoder(input_params *params, struct input_ctx *ctx)
         LPMS_ERR(open_decoder_err, "Input codec does not support hardware acceleration");
       }
       AVCodec *c = avcodec_find_decoder_by_name(decoder_name);
-      av_log(NULL, AV_LOG_WARNING, "WARNING: %s:%d] HW_TYPE %d, decoder_name %s\n", __FILE__, __LINE__, params->hw_type, decoder_name); \
       if (c) codec = c;
       else LPMS_WARN("Hardware decoder not found; defaulting to software");
       if (AV_PIX_FMT_YUV420P != ic->streams[ctx->vi]->codecpar->format &&
@@ -283,6 +282,7 @@ int open_video_decoder(input_params *params, struct input_ctx *ctx)
       ctx->hw_type = params->hw_type;
       vc->hw_device_ctx = av_buffer_ref(ctx->hw_device_ctx);
       vc->get_format = get_hw_pixfmt;
+      av_log(NULL, AV_LOG_WARNING, "WARNING: %s:%d] HW_TYPE %d\n", __FILE__, __LINE__, params->hw_type); \
     }
     vc->pkt_timebase = ic->streams[ctx->vi]->time_base;
     ret = avcodec_open2(vc, codec, NULL);
